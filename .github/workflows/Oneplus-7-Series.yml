@@ -15,7 +15,7 @@ env:
   KERNEL_SOURCE : "https://github.com/beingsk5/android_kernel_oneplus_sm8150.git"
   KERNEL_BRANCH : "16w"
 
-  CLANG_SOURCE : "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/603a89415bbb04dff8bc577b95534479ec13fdc5/clang-r574158.tar.gz"
+  CLANG_SOURCE : "https://git.codelinaro.org/clo/la/kernel_platform/prebuilts/build-tools/-/archive/android-16.0.0_r4/build-tools-android-16.0.0_r4.tar.gz?ref_type=tags?path=clang-r574158"
   CLANG_BRANCH : ""
 
   GCC_GNU : false
