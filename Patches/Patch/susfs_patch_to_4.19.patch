@@ -612,10 +612,10 @@ index 94f388e..cca3ab6 100644
  	return filp;
  }
 diff --git a/fs/namespace.c b/fs/namespace.c
-index 5e94ec9..58151af 100644
+index 5e94ec9..80eb824 100644
 --- a/fs/namespace.c
 +++ b/fs/namespace.c
-@@ -26,10 +26,23 @@
+@@ -26,10 +26,22 @@
  #include <linux/bootmem.h>
  #include <linux/task_work.h>
  #include <linux/sched/task.h>
@@ -630,7 +630,6 @@ index 5e94ec9..58151af 100644
 +extern bool susfs_is_current_ksu_domain(void);
 +extern bool susfs_is_sdcard_android_data_decrypted;
 +
-+static DEFINE_IDA(susfs_ksu_mnt_group_ida);
 +static atomic64_t susfs_ksu_mounts = ATOMIC64_INIT(0);
 +
 +#define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */
@@ -639,7 +638,7 @@ index 5e94ec9..58151af 100644
  /* Maximum number of mounts in a mount namespace */
  unsigned int sysctl_mount_max __read_mostly = 100000;
  
-@@ -108,6 +121,18 @@ static int mnt_alloc_id(struct mount *mnt)
+@@ -108,6 +120,18 @@ static int mnt_alloc_id(struct mount *mnt)
  
  static void mnt_free_id(struct mount *mnt)
  {
@@ -658,20 +657,21 @@ index 5e94ec9..58151af 100644
  	ida_free(&mnt_id_ida, mnt->mnt_id);
  }
  
-@@ -116,7 +141,23 @@ static void mnt_free_id(struct mount *mnt)
+@@ -116,7 +140,24 @@ static void mnt_free_id(struct mount *mnt)
   */
  static int mnt_alloc_group_id(struct mount *mnt)
  {
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 +	int res;
 +
-+	/* - At frist susfs_is_sdcard_android_data_decrypted is set to false in kernel,
-+	 *   and it is still allowed to assign our custom mnt_group_id via susfs_ksu_mnt_group_ida
-+	 *   if it is ksu mounts, until susfs_is_sdcard_android_data_decrypted is set to true
-+	 *   when boot-completed stage is triggered in core_hook.c
++	/* - mnt_alloc_group_id will unlikely get called after screen is unlocked on reboot,
++	 *   so here we can persistently check if current is ksu domain, and assign a sus
++	 *   mnt_group_id if so.
++	 * - Also we can re-use the original mnt_group_ida so there is no need to use
++	 *   another ida nor hook the mnt_release_group_id() function.
 +	 */
-+	if (!susfs_is_sdcard_android_data_decrypted && mnt->mnt_id >= DEFAULT_KSU_MNT_ID) {
-+		res = ida_alloc_min(&susfs_ksu_mnt_group_ida, DEFAULT_KSU_MNT_GROUP_ID, GFP_KERNEL);
++	if (susfs_is_current_ksu_domain()) {
++		res = ida_alloc_min(&mnt_group_ida, DEFAULT_KSU_MNT_GROUP_ID, GFP_KERNEL);
 +		goto bypass_orig_flow;
 +	}
 +	res = ida_alloc_min(&mnt_group_ida, 1, GFP_KERNEL);
@@ -682,30 +682,7 @@ index 5e94ec9..58151af 100644
  
  	if (res < 0)
  		return res;
-@@ -129,6 +170,22 @@ static int mnt_alloc_group_id(struct mount *mnt)
-  */
- void mnt_release_group_id(struct mount *mnt)
- {
-+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-+	/* - when boot-completed stage is triggered in core_hook.c,
-+	 *   susfs_is_sdcard_android_data_decrypted will be set to true.
-+	 * - Please note that if susfs_is_sdcard_android_data_decrypted is true, then
-+	 *   it no longer checks for the sus mnt_group_id, and the allocated
-+	 *   sus mnt_group_id will stay in kernel memory forever, and if user
-+	 *   suddenly umounts the sus mount in global mnt namespace, the ida_free()
-+	 *   function will throw error to kernel log, but it won't affect the system,
-+	 *   so it is fine.
-+	 */
-+	if (!susfs_is_sdcard_android_data_decrypted && mnt->mnt_group_id >= DEFAULT_KSU_MNT_GROUP_ID) {
-+		ida_free(&susfs_ksu_mnt_group_ida, mnt->mnt_group_id);
-+		mnt->mnt_group_id = 0;
-+		return;
-+	}
-+#endif
- 	ida_free(&mnt_group_ida, mnt->mnt_group_id);
- 	mnt->mnt_group_id = 0;
- }
-@@ -174,6 +231,113 @@ static void drop_mountpoint(struct fs_pin *p)
+@@ -174,6 +215,113 @@ static void drop_mountpoint(struct fs_pin *p)
  	mntput(&m->mnt);
  }
  
@@ -819,7 +796,7 @@ index 5e94ec9..58151af 100644
  static struct mount *alloc_vfsmnt(const char *name)
  {
  	struct mount *mnt = kmem_cache_zalloc(mnt_cache, GFP_KERNEL);
-@@ -181,6 +345,7 @@ static struct mount *alloc_vfsmnt(const char *name)
+@@ -181,6 +329,7 @@ static struct mount *alloc_vfsmnt(const char *name)
  		int err;
  
  		err = mnt_alloc_id(mnt);
@@ -827,7 +804,7 @@ index 5e94ec9..58151af 100644
  		if (err)
  			goto out_free_cache;
  
-@@ -199,6 +364,10 @@ static struct mount *alloc_vfsmnt(const char *name)
+@@ -199,6 +348,10 @@ static struct mount *alloc_vfsmnt(const char *name)
  #else
  		mnt->mnt_count = 1;
  		mnt->mnt_writers = 0;
@@ -838,7 +815,7 @@ index 5e94ec9..58151af 100644
  #endif
  		mnt->mnt.data = NULL;
  
-@@ -949,11 +1118,12 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void
+@@ -949,11 +1102,12 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void
  {
  	struct mount *mnt;
  	struct dentry *root;
@@ -852,7 +829,7 @@ index 5e94ec9..58151af 100644
  	if (!mnt)
  		return ERR_PTR(-ENOMEM);
  
-@@ -979,6 +1149,7 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void
+@@ -979,6 +1133,7 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void
  	mnt->mnt.mnt_sb = root->d_sb;
  	mnt->mnt_mountpoint = mnt->mnt.mnt_root;
  	mnt->mnt_parent = mnt;
@@ -860,7 +837,7 @@ index 5e94ec9..58151af 100644
  	lock_mount_hash();
  	list_add_tail(&mnt->mnt_instance, &root->d_sb->s_mounts);
  	unlock_mount_hash();
-@@ -1008,7 +1179,33 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
+@@ -1008,7 +1163,33 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
  	struct mount *mnt;
  	int err;
  
@@ -894,7 +871,7 @@ index 5e94ec9..58151af 100644
  	if (!mnt)
  		return ERR_PTR(-ENOMEM);
  
-@@ -1060,6 +1257,7 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
+@@ -1060,6 +1241,7 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
  	mnt->mnt.mnt_root = dget(root);
  	mnt->mnt_mountpoint = mnt->mnt.mnt_root;
  	mnt->mnt_parent = mnt;
@@ -902,7 +879,7 @@ index 5e94ec9..58151af 100644
  	lock_mount_hash();
  	list_add_tail(&mnt->mnt_instance, &sb->s_mounts);
  	unlock_mount_hash();
-@@ -1740,7 +1938,7 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
+@@ -1740,7 +1922,7 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
  					int flag)
  {
  	struct mount *res, *p, *q, *r, *parent;
@@ -911,7 +888,7 @@ index 5e94ec9..58151af 100644
  	if (!(flag & CL_COPY_UNBINDABLE) && IS_MNT_UNBINDABLE(mnt))
  		return ERR_PTR(-EINVAL);
  
-@@ -1756,6 +1954,7 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
+@@ -1756,6 +1938,7 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
  	p = mnt;
  	list_for_each_entry(r, &mnt->mnt_mounts, mnt_child) {
  		struct mount *s;
@@ -919,7 +896,7 @@ index 5e94ec9..58151af 100644
  		if (!is_subdir(r->mnt_mountpoint, dentry))
  			continue;
  
-@@ -1785,6 +1984,7 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
+@@ -1785,6 +1968,7 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
  			q = clone_mnt(p, p->mnt.mnt_root, flag);
  			if (IS_ERR(q))
  				goto out;
@@ -927,7 +904,7 @@ index 5e94ec9..58151af 100644
  			lock_mount_hash();
  			list_add_tail(&q->mnt_list, &res->mnt_list);
  			attach_mnt(q, parent, p->mnt_mp);
-@@ -2945,6 +3145,9 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
+@@ -2945,6 +3129,9 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
  	copy_flags = CL_COPY_UNBINDABLE | CL_EXPIRE;
  	if (user_ns != ns->user_ns)
  		copy_flags |= CL_SHARED_TO_SLAVE | CL_UNPRIVILEGED;
@@ -937,7 +914,7 @@ index 5e94ec9..58151af 100644
  	new = copy_tree(old, old->mnt.mnt_root, copy_flags);
  	if (IS_ERR(new)) {
  		namespace_unlock();
-@@ -2961,6 +3164,7 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
+@@ -2961,6 +3148,7 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
  	 */
  	p = old;
  	q = new;
@@ -945,7 +922,7 @@ index 5e94ec9..58151af 100644
  	while (p) {
  		q->mnt_ns = new_ns;
  		new_ns->mounts++;
-@@ -2981,6 +3185,7 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
+@@ -2981,6 +3169,7 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
  		while (p->mnt.mnt_root != q->mnt.mnt_root)
  			p = next_mnt(p, old);
  	}
@@ -953,7 +930,7 @@ index 5e94ec9..58151af 100644
  	namespace_unlock();
  
  	if (rootmnt)
-@@ -3527,3 +3732,33 @@ const struct proc_ns_operations mntns_operations = {
+@@ -3527,3 +3716,33 @@ const struct proc_ns_operations mntns_operations = {
  	.install	= mntns_install,
  	.owner		= mntns_owner,
  };
@@ -2018,10 +1995,10 @@ index 2978659..4c4712f 100644
  
 diff --git a/fs/susfs.c b/fs/susfs.c
 new file mode 100644
-index 0000000..70b7ec8
+index 0000000..38e7d7d
 --- /dev/null
 +++ b/fs/susfs.c
-@@ -0,0 +1,1229 @@
+@@ -0,0 +1,1210 @@
 +#include <linux/version.h>
 +#include <linux/cred.h>
 +#include <linux/fs.h>
@@ -3058,10 +3035,9 @@ index 0000000..70b7ec8
 +
 +/* kthread for checking if /sdcard/Android is accessible via fsnoitfy */
 +/* code is straightly borrowed from KernelSU's pkg_observer.c */
-+#define SDCARD_ANDROID_DATA_PATH "/sdcard/Android"
++#define SDCARD_ANDROID_DATA_PATH "/data/media/0/Android"
 +extern void setup_selinux(const char *domain, struct cred *cred);
 +extern bool susfs_is_current_ksu_domain(void);
-+static struct task_struct *susfs_sdcard_monitor_thread;
 +bool susfs_is_sdcard_android_data_decrypted __read_mostly = false;
 +
 +struct watch_dir {
@@ -3074,15 +3050,15 @@ index 0000000..70b7ec8
 +
 +static struct fsnotify_group *g;
 +
-+static struct watch_dir g_watch = { .path = "/sdcard",
-+									.mask = (FS_CREATE | FS_MOVE | FS_EVENT_ON_CHILD) };
++static struct watch_dir g_watch = { .path = "/data/media/0", // we choose the underlying f2fs /data/media/0 instead of the FUSE /sdcard
++	.mask = (FS_EVENT_ON_CHILD | FS_ISDIR | FS_OPEN_PERM) };
 +
 +static int add_mark_on_inode(struct inode *inode, u32 mask,
 +								struct fsnotify_mark **out);
 +
 +static int watch_one_dir(struct watch_dir *wd)
 +{
-+	int ret = kern_path(wd->path, 0, &wd->kpath);
++	int ret = kern_path(wd->path, LOOKUP_FOLLOW, &wd->kpath);
 +	if (ret) {
 +		SUSFS_LOGI("path not ready: %s (%d)\n", wd->path, ret);
 +		return ret;
@@ -3093,53 +3069,37 @@ index 0000000..70b7ec8
 +	ret = add_mark_on_inode(wd->inode, wd->mask, &wd->mark);
 +	if (ret) {
 +		SUSFS_LOGE("Add mark failed for %s (%d)\n", wd->path, ret);
-+		path_put(&wd->kpath);
 +		iput(wd->inode);
 +		wd->inode = NULL;
++		path_put(&wd->kpath);
 +		return ret;
 +	}
 +	SUSFS_LOGI("watching %s\n", wd->path);
 +	return 0;
 +}
 +
-+static void unwatch_one_dir(struct watch_dir *wd)
-+{
-+	if (wd->mark) {
-+		fsnotify_destroy_mark(wd->mark, g);
-+		fsnotify_put_mark(wd->mark);
-+		wd->mark = NULL;
-+	}
-+	if (wd->inode) {
-+		iput(wd->inode);
-+		wd->inode = NULL;
-+	}
-+	if (wd->kpath.dentry) {
-+		path_put(&wd->kpath);
-+		memset(&wd->kpath, 0, sizeof(wd->kpath));
-+	}
-+}
-+
 +static SUSFS_DECL_FSNOTIFY_OPS(susfs_handle_sdcard_inode_event)
 +{
 +	static bool target_path_is_found = false;
 +
-+	if (!file_name)
++	if (target_path_is_found || !file_name)
 +		return 0;
-+	if (mask & FS_ISDIR)
-+		return 0;
-+	if (target_path_is_found)
-+		return 0;
-+	if (susfs_fname_len(file_name) == 7 && !memcmp(susfs_fname_arg(file_name), "Android", 7)) {
-+		SUSFS_LOGI("'%s' detected, mask: %d\n", SDCARD_ANDROID_DATA_PATH, mask);
++	if (susfs_fname_len(file_name) == 13 && !memcmp(susfs_fname_arg(file_name), "Android", 7)) {
 +		target_path_is_found = true;
-+		unwatch_one_dir(&g_watch);
-+		fsnotify_put_group(g);
++		SUSFS_LOGI("'%s' detected, mask: 0x%x\n", SDCARD_ANDROID_DATA_PATH, mask);
 +		SUSFS_LOGI("sleeping for 5 more seconds just in case some other modules are still mounting stuff\n");
 +		msleep(5000);
 +		SUSFS_LOGI("set susfs_is_sdcard_android_data_decrypted to true\n");
 +		WRITE_ONCE(susfs_is_sdcard_android_data_decrypted, true);
-+		WRITE_ONCE(susfs_sdcard_monitor_thread, NULL);
-+		SUSFS_LOGI("observer exit done\n");
++		SUSFS_LOGI("cleaning up\n");
++		if (g) {
++			fsnotify_destroy_group(g);
++		}
++		if (g_watch.inode) {
++			iput(g_watch.inode);
++			g_watch.inode = NULL;
++		}
++		path_put(&g_watch.kpath);
 +	}
 +	return 0;
 +}
@@ -3207,7 +3167,6 @@ index 0000000..70b7ec8
 +
 +	if (!susfs_is_current_ksu_domain()) {
 +		SUSFS_LOGE("domain is not su, exiting the thread\n");
-+		susfs_sdcard_monitor_thread = NULL;
 +		return -EINVAL;
 +	}
 +
@@ -3225,14 +3184,13 @@ index 0000000..70b7ec8
 +
 +	ret = watch_one_dir(&g_watch);
 +
-+	SUSFS_LOGI("observer init done, ret: %d\n", ret);
++	SUSFS_LOGI("ret: %d\n", ret);
 +
 +	return 0;
 +}
 +
 +void susfs_start_sdcard_monitor_fn(void) {
-+	susfs_sdcard_monitor_thread = kthread_run(susfs_sdcard_monitor_fn, NULL, "susfs_sdcard_monitor");
-+	if (IS_ERR(susfs_sdcard_monitor_thread)) {
++	if (IS_ERR(kthread_run(susfs_sdcard_monitor_fn, NULL, "susfs_sdcard_monitor"))) {
 +		SUSFS_LOGE("failed to create thread susfs_sdcard_monitor\n");
 +		SUSFS_LOGI("set susfs_is_sdcard_android_data_decrypted to true\n");
 +		susfs_is_sdcard_android_data_decrypted = true;
