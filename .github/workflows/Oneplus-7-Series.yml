@@ -15,7 +15,7 @@ env:
   KERNEL_SOURCE : "https://github.com/beingsk5/android_kernel_oneplus_sm8150.git"
   KERNEL_BRANCH : "16w"
 
-  CLANG_SOURCE : "https://git.codelinaro.org/clo/la/kernel_platform/prebuilts/build-tools/-/archive/android-16.0.0_r4/build-tools-android-16.0.0_r4.tar.gz?ref_type=tags?path=clang-r574158"
+  CLANG_SOURCE : "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/531a564ba5426707dee226eccb19f104a7af5a5f/clang-r563880c.tar.gz"
   CLANG_BRANCH : ""
 
   GCC_GNU : false
@@ -25,7 +25,7 @@ env:
   GCC_32_BRANCH : ""
 
   DEFCONFIG_SOURCE: ""
-  DEFCONFIG_NAME : "sm8150c_defconfig"
+  DEFCONFIG_NAME : "sm8150p_defconfig"
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
 
