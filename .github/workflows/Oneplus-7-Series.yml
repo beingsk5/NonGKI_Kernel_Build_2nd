@@ -111,7 +111,8 @@ jobs:
 
       - name: 🔄 Update KernelSU-Umount
         run: |
-          
+
+             cd $GITHUB_WORKSPACE/device_kernel
              echo "Applying SM8150 patch"
              patch -p1 --forward --batch < sm8150.patch || true
              echo "Patch done, continuing"
