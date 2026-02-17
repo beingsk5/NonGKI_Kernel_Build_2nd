@@ -111,15 +111,15 @@ jobs:
 
       - name: 🔄 Update KernelSU-Umount
         run: |
-          #    git clone --depth=1 -b power https://github.com/beingsk5/King.git power
-          #    cp power/*.patch $GITHUB_WORKSPACE/device_kernel/
+        #    git clone --depth=1 -b power https://github.com/beingsk5/King.git power
+        #    cp power/*.patch $GITHUB_WORKSPACE/device_kernel/
           
            set -e
            cd $GITHUB_WORKSPACE/device_kernel
            git config user.email "actions@github.com"
            git config user.name "GitHub Actions"
 
-           git am --3way --whitespace=nowarn sm8150.patch          
+           git apply --reject --whitespace=nowarn sm8150.patch          
       #     git am --3way --whitespace=nowarn power1.patch
       #     git am --3way --whitespace=nowarn power2.patch
       #     git am --3way --whitespace=nowarn power3.patch
