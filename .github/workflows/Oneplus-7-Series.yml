@@ -112,12 +112,16 @@ jobs:
       - name: 🔄 Update KernelSU-Umount
         run: |
           
-            set -e
-            cd $GITHUB_WORKSPACE/device_kernel
-            git config user.email "actions@github.com"
-            git config user.name "GitHub Actions"
+             echo "Applying SM8150 patch"
+             patch -p1 --forward --batch < sm8150.patch || true
+             echo "Patch done, continuing"
+       
+      #      set -e
+      #      cd $GITHUB_WORKSPACE/device_kernel
+      #      git config user.email "actions@github.com"
+      #      git config user.name "GitHub Actions"
 
-            patch -p1 < sm8150.patch
+      #     patch -p1 < sm8150.patch
             
       #     git clone --depth=1 -b power https://github.com/beingsk5/King.git power
       #     cp power/*.patch $GITHUB_WORKSPACE/device_kernel/      
