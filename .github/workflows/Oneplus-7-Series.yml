@@ -109,6 +109,11 @@ jobs:
       - name: ⚙️ Get neccssary tools
         uses: ./.github/workflows/build-ready
 
+      - name: Fix kernel version string
+        run: |
+          cd kernel
+          echo "" > .scmversion
+  
       - name: 🔄 Update KernelSU-Umount
         run: |
      #     cd $GITHUB_WORKSPACE/device_kernel
