@@ -111,7 +111,7 @@ jobs:
 
       - name: Fix kernel version string
         run: |
-          cd kernel
+          cd $GITHUB_WORKSPACE/device_kernel
           echo "" > .scmversion
   
       - name: 🔄 Update KernelSU-Umount
