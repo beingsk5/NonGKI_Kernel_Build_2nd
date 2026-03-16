@@ -166,7 +166,7 @@ jobs:
          
          if [[ -f "$IMAGE_DIR/Image" ]]; then
          cp -fp $IMAGE_DIR/Image tmp
-         echo "Found Image !"
+         echo "Found Image!"
          fi
 
          mkdir -p tmp/modules/vendor/lib/modules/
@@ -186,11 +186,23 @@ jobs:
 
          ZIP_NAME="${{ env.DEVICE_CODENAME }}-${{ env.ROM_TEXT }}-$TIME-${{ env.PACK_METHOD }}.zip"
 
-         7za a -mx9 -r "$ZIP_NAME" ./tmp/*
+         cd tmp
+         zip -r9 ../"$ZIP_NAME" *
+         cd ..
 
          rm -rf tmp
 
          echo "PACK_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
-      - name: ✏️ Upload Artifacts
-        uses: ./.github/workflows/upload-files
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Kernel Build ${{ github.run_number }}
+          body: |
+            ✅ Device: ${{ env.DEVICE_NAME }}
+            ⚙️ Kernel: ${{ env.DEVICE_CODENAME }}
+            📅 Build Date: ${{ github.run_id }}
+          files: device_kernel/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
